@@ -1,0 +1,69 @@
+#-------------------------------------------------------------------------------------------------
+# EMAIL WEB SCRAPPER
+# 
+# Pablo Marchesi
+# Feb 2023
+#-------------------------------------------------------------------------------------------------
+
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+import re
+
+xlsx = r'Your_Emails.xlsx'
+df = pd.read_excel(xlsx)
+web = df['website'].dropna()
+email_list = []
+
+for i in range(len(web)):
+    url = web.iloc[i]
+    try:
+        # Extraccion del código fuente de la web 
+        response = requests.get(url, timeout=2)
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Chequea si la pagina tiene pagina de contacto (dara un aviso en caso de que no encuentre el email)
+        contact_link = soup.find("a", href=re.compile("contacto|quienes somos|contactus|quiénes somos|contactanos|contactar|contáctanos|contact us|contact", re.IGNORECASE))
+
+        # Busca los emails en el codigo fuente 
+        email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[com|es|net|org|edu|gov|info|biz|io|co|uk|au|ca]{2,}" 
+        emails = list(set((re.findall(email_pattern, str(soup)))))
+
+        # Filtrado para emails muy largos
+        n = 40
+        emails = [x for x in emails if len(x) <= n]
+        email_list.append(emails)
+
+        # Si no ha encntrado email pero hay pagina de contacto, buscalo ahi
+        if(contact_link) and emails == []: 
+            try:
+                # Busca en la pagina de contacto
+                contact_url = contact_link["href"]
+                if not contact_url.startswith('https://') and not contact_url.startswith('http://'): 
+                    contact_url = url + contact_url
+                contact_response = requests.get(contact_url, timeout=2)
+                contact_soup = BeautifulSoup(contact_response.content, "html.parser")
+                email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[com|es|net|org|edu|gov|info|biz|io|co|uk|au|ca]{2,}"
+                emails = list(set((re.findall(email_pattern, str(contact_soup)))))
+
+                # Filtrado para emails muy largos
+                n = 40 
+                emails = [x for x in emails if len(x) <= n]
+                email_list[-1] = emails
+                if email_list[-1] == []: email_list[-1] = ['Posible formulario de contacto']
+            except: print('Posible form'); email_list[-1] = ['No se puede acceder a la pagina de contacto']
+        print(f'Loading {round(100*(i/(len(web)-1)),2)}%')
+        if email_list[-1] == []: email_list[-1] = ['No se ha encontrado el email en la web']
+    except Exception as e:  email_list.append(['No se puede acceder a la web']); print(f'Error: {e}')
+
+# Resultados 
+df_emails = pd.DataFrame({'Emails':email_list, 'Webs': web, 'Has Email':0})
+
+# Cuenta los mails obtenidos 
+count = 0
+for i in range(len(email_list)):
+    if '@' in email_list[i][0]: count += 1; df_emails['Has Email'][i] = 1
+emails_found = round(100*(count/len(web)),2)
+
+# Display del % de emails y df con la info 
+print(f'Emails found: {emails_found}%')
